@@ -1,25 +1,23 @@
 import os
-from flask import Flask, request
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, Defaults
+import asyncio
+import threading
+from flask import Flask
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.environ["BOT_TOKEN"]
 user_thumbs = {}
 
-# Создаём приложение
-app = Application.builder().token(TOKEN).build()
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     await update.message.reply_text(
         "1. Пришли фото с подписью /setpreview\n"
         "2. Пришли видео как файл — получишь его как медиа с твоей обложкой"
     )
 
-async def set_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def set_preview(update, context):
     user_thumbs[update.effective_user.id] = update.message.photo[-1].file_id
     await update.message.reply_text("✅ Обложка сохранена. Теперь присылай видео файлом.")
 
-async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def video_handler(update, context):
     uid = update.effective_user.id
     if uid not in user_thumbs:
         await update.message.reply_text("⚠️ Сначала установи обложку: пришли фото с подписью /setpreview")
@@ -31,29 +29,23 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supports_streaming=True
     )
 
+app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r'^/setpreview$'), set_preview))
 app.add_handler(MessageHandler(filters.Document.VIDEO, video_handler))
 
-# Инициализируем приложение один раз при старте
-import asyncio
-asyncio.run(app.initialize())
+# Запускаем polling в отдельном потоке, чтобы не блокировать Flask
+def run_polling():
+    asyncio.run(app.run_polling())
 
-# Flask-приложение
+threading.Thread(target=run_polling, daemon=True).start()
+
+# Flask для того, чтобы Render не ругался, что порт не слушает
 flask_app = Flask(__name__)
-
-@flask_app.route("/webhook", methods=["POST"])
-def webhook():
-    # Получаем обновление
-    update = Update.de_json(request.get_json(force=True), app.bot)
-    # Обрабатываем его синхронно через process_update (не async)
-    app.process_update(update)
-    return "ok"
 
 @flask_app.route("/")
 def index():
     return "Bot is running"
 
 if __name__ == "__main__":
-    # Запускаем Flask (вебхук)
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
