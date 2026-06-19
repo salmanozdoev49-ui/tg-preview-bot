@@ -1,10 +1,11 @@
 import os
+import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = os.environ["BOT_TOKEN"]
-user_thumbs = {}  # хранит id обложки для каждого пользователя
+user_thumbs = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -13,7 +14,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def set_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Запоминаем самое большое фото из сообщения
     user_thumbs[update.effective_user.id] = update.message.photo[-1].file_id
     await update.message.reply_text("✅ Обложка сохранена. Теперь присылай видео файлом.")
 
@@ -29,20 +29,22 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supports_streaming=True
     )
 
-# Создаём приложение до Flask, чтобы использовать его в вебхуке
+# Создаём приложение
 app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r'^/setpreview$'), set_preview))
 app.add_handler(MessageHandler(filters.Document.VIDEO, video_handler))
 
-# Flask-приложение для вебхука
+# Инициализируем приложение (обязательно!)
+asyncio.run(app.initialize())
+
 flask_app = Flask(__name__)
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app.bot)
-    # Используем синхронный метод process_update вместо асинхронного update_queue.put
-    app.process_update(update)
+    # Теперь правильно обрабатываем обновление синхронно
+    asyncio.run(app.process_update(update))
     return "ok"
 
 @flask_app.route("/")
@@ -50,5 +52,4 @@ def index():
     return "Bot is running"
 
 if __name__ == "__main__":
-    # Запускаем Flask-сервер, а не polling (т.к. используем вебхук)
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
