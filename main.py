@@ -1,11 +1,13 @@
 import os
-import asyncio
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, Defaults
 
 TOKEN = os.environ["BOT_TOKEN"]
 user_thumbs = {}
+
+# Создаём приложение
+app = Application.builder().token(TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -29,22 +31,23 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supports_streaming=True
     )
 
-# Создаём приложение
-app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r'^/setpreview$'), set_preview))
 app.add_handler(MessageHandler(filters.Document.VIDEO, video_handler))
 
-# Инициализируем приложение (обязательно!)
+# Инициализируем приложение один раз при старте
+import asyncio
 asyncio.run(app.initialize())
 
+# Flask-приложение
 flask_app = Flask(__name__)
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
+    # Получаем обновление
     update = Update.de_json(request.get_json(force=True), app.bot)
-    # Теперь правильно обрабатываем обновление синхронно
-    asyncio.run(app.process_update(update))
+    # Обрабатываем его синхронно через process_update (не async)
+    app.process_update(update)
     return "ok"
 
 @flask_app.route("/")
@@ -52,4 +55,5 @@ def index():
     return "Bot is running"
 
 if __name__ == "__main__":
+    # Запускаем Flask (вебхук)
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
