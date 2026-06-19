@@ -29,13 +29,20 @@ async def video_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supports_streaming=True
     )
 
+# Создаём приложение до Flask, чтобы использовать его в вебхуке
+app = Application.builder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r'^/setpreview$'), set_preview))
+app.add_handler(MessageHandler(filters.Document.VIDEO, video_handler))
+
 # Flask-приложение для вебхука
 flask_app = Flask(__name__)
 
 @flask_app.route("/webhook", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), app.bot)
-    app.update_queue.put(update)
+    # Используем синхронный метод process_update вместо асинхронного update_queue.put
+    app.process_update(update)
     return "ok"
 
 @flask_app.route("/")
@@ -43,9 +50,5 @@ def index():
     return "Bot is running"
 
 if __name__ == "__main__":
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO & filters.CaptionRegex(r'^/setpreview$'), set_preview))
-    app.add_handler(MessageHandler(filters.Document.VIDEO, video_handler))
-    app.initialize()
+    # Запускаем Flask-сервер, а не polling (т.к. используем вебхук)
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
